@@ -9,6 +9,7 @@ const distanceCalculator = require('./distanceCalculator');
 
 const STORAGE_FILE = path.join(__dirname, '../../data/potholes.json');
 const DUPLICATE_THRESHOLD_METERS = 5; // Consider potholes within 5m as duplicates
+const TOO_CLOSE_THRESHOLD_METERS = 0.02; // 2 cm - don't increment count if within this distance
 
 // Ensure data directory exists
 const dataDir = path.dirname(STORAGE_FILE);
@@ -110,11 +111,27 @@ function addPothole(potholeData) {
 }
 
 // Update detection count for existing pothole
-function incrementDetectionCount(potholeId) {
+// Only increments if the new detection coordinates are more than 2 cm away
+function incrementDetectionCount(potholeId, newCoordinates = null) {
   const potholes = loadPotholes();
   const index = potholes.findIndex(p => p.id === potholeId);
   
   if (index !== -1) {
+    // If coordinates are provided, check distance
+    if (newCoordinates && potholes[index].coordinates) {
+      const distance = distanceCalculator.calculateDistance(
+        newCoordinates,
+        potholes[index].coordinates
+      );
+      
+      // Don't increment if within 2 cm (same detection, too close)
+      if (distance <= TOO_CLOSE_THRESHOLD_METERS) {
+        console.log(`Detection too close (${distance.toFixed(4)}m <= ${TOO_CLOSE_THRESHOLD_METERS}m), not incrementing count`);
+        return potholes[index]; // Return without incrementing
+      }
+    }
+    
+    // Increment count (either no coordinates provided, or distance > 2 cm)
     potholes[index].detection_count = (potholes[index].detection_count || 1) + 1;
     potholes[index].updated_at = new Date().toISOString();
     savePotholes(potholes);
@@ -166,6 +183,7 @@ module.exports = {
   getPotholesNearby,
   incrementDetectionCount,
   deletePothole,
-  DUPLICATE_THRESHOLD_METERS
+  DUPLICATE_THRESHOLD_METERS,
+  TOO_CLOSE_THRESHOLD_METERS
 };
 

@@ -482,6 +482,11 @@ int main(int argc, char** argv) {
         cout << "==================================================" << endl;
 
         auto startTime = chrono::high_resolution_clock::now();
+        
+        // Frame rate control: 30 FPS = 33.33ms per frame
+        const double targetFps = 30.0;
+        const double frameTimeMs = 1000.0 / targetFps; // ~33.33ms per frame
+        auto lastFrameTime = chrono::high_resolution_clock::now();
 
         while (true) {
             // Continuous processing - no pause logic
@@ -590,15 +595,35 @@ int main(int argc, char** argv) {
                     double processingFps = (duration.count() > 0) ? frameCount / (double)duration.count() : 0;
                     cout << "Progress: " << frameCount << "/" << totalFrames
                          << " (" << (frameCount * 100 / max(1,totalFrames)) << "%) "
-                         << "| FPS: " << fixed << setprecision(2) << processingFps << endl;
+                         << "| FPS: " << fixed << setprecision(2) << processingFps << " (target: " << targetFps << ")" << endl;
                 }
             imshow("YOLO + SORT + Distance", frame);
-            int key = waitKey(1); // Non-blocking wait
             
-            if (key == 27) { 
-                cout << "\nESC pressed. Exiting..." << endl;
-                break;
+            // Frame rate control: maintain 30 FPS
+            auto currentFrameTime = chrono::high_resolution_clock::now();
+            auto elapsed = chrono::duration_cast<chrono::milliseconds>(currentFrameTime - lastFrameTime);
+            double elapsedMs = elapsed.count();
+            
+            if (elapsedMs < frameTimeMs) {
+                // Wait to maintain 30 FPS
+                int waitTime = static_cast<int>(frameTimeMs - elapsedMs);
+                int key = waitKey(waitTime);
+                
+                if (key == 27) { 
+                    cout << "\nESC pressed. Exiting..." << endl;
+                    break;
+                }
+            } else {
+                // Frame took longer than target time, process immediately
+                int key = waitKey(1);
+                
+                if (key == 27) { 
+                    cout << "\nESC pressed. Exiting..." << endl;
+                    break;
+                }
             }
+            
+            lastFrameTime = chrono::high_resolution_clock::now();
             // Removed SPACEBAR pause/resume - model runs continuously
         }
 

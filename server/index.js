@@ -84,9 +84,25 @@ app.post('/webhook', (req, res) => {
       const existingPothole = potholeStorage.findExistingPothole(potholeCoords);
       
       if (existingPothole) {
-        // Pothole already exists - increment detection count
-        console.log('Pothole already exists at this location, incrementing detection count');
-        const updated = potholeStorage.incrementDetectionCount(existingPothole.id);
+        // Pothole already exists - check if we should increment count
+        // Only increment if detection is more than 2 cm away (not the same detection)
+        const distance = distanceCalculator.calculateDistance(
+          potholeCoords,
+          existingPothole.coordinates
+        );
+        
+        let updated = existingPothole;
+        let countIncremented = false;
+        
+        if (distance > potholeStorage.TOO_CLOSE_THRESHOLD_METERS) {
+          // More than 2 cm away - increment count (new detection of same pothole)
+          console.log(`Pothole exists at distance ${distance.toFixed(4)}m, incrementing detection count`);
+          updated = potholeStorage.incrementDetectionCount(existingPothole.id, potholeCoords);
+          countIncremented = true;
+        } else {
+          // Within 2 cm - same detection, don't increment
+          console.log(`Pothole detection too close (${distance.toFixed(4)}m <= ${potholeStorage.TOO_CLOSE_THRESHOLD_METERS}m), not incrementing count`);
+        }
         
         // Broadcast existing pothole alert (not a new detection)
         broadcast({
@@ -97,7 +113,8 @@ app.post('/webhook', (req, res) => {
               ...notification.pothole,
               coordinates: existingPothole.coordinates,
               existing: true,
-              detection_count: updated.detection_count
+              detection_count: updated.detection_count,
+              count_incremented: countIncremented
             }
           }
         });
@@ -106,7 +123,9 @@ app.post('/webhook', (req, res) => {
           success: true, 
           isDuplicate: true,
           existingPotholeId: existingPothole.id,
-          detectionCount: updated.detection_count
+          detectionCount: updated.detection_count,
+          countIncremented: countIncremented,
+          distance: distance
         });
       } else {
         // New pothole - save to persistent storage
