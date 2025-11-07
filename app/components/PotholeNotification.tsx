@@ -80,25 +80,27 @@ export default function PotholeNotification({
 
         <View style={styles.details}>
           <View style={styles.detailRow}>
-            <Text style={styles.label}>Distance:</Text>
+            <Text style={styles.label}>📍 Distance:</Text>
             <Text style={styles.value}>{current_distance.toFixed(1)} m</Text>
           </View>
 
           <View style={styles.detailRow}>
-            <Text style={styles.label}>Lateral Offset:</Text>
-            <Text style={styles.value}>{pothole.lateral_m.toFixed(2)} m</Text>
+            <Text style={styles.label}>↔️ Lateral:</Text>
+            <Text style={styles.value}>
+              {pothole.lateral_m >= 0 ? 'Right' : 'Left'} {Math.abs(pothole.lateral_m).toFixed(2)} m
+            </Text>
           </View>
 
           {pothole.size > 0 && (
             <View style={styles.detailRow}>
-              <Text style={styles.label}>Size:</Text>
+              <Text style={styles.label}>📏 Size:</Text>
               <Text style={styles.value}>{pothole.size.toFixed(2)} m²</Text>
             </View>
           )}
 
           {pothole.coordinates && (
-            <View style={styles.detailRow}>
-              <Text style={styles.label}>Location:</Text>
+            <View style={styles.coordinateContainer}>
+              <Text style={styles.coordinateLabel}>🌍 GPS Coordinates:</Text>
               <Text style={styles.coordinateText}>
                 {pothole.coordinates.latitude.toFixed(6)}, {pothole.coordinates.longitude.toFixed(6)}
               </Text>
@@ -178,9 +180,21 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: 'bold',
   },
-  coordinateText: {
+  coordinateContainer: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 6,
+  },
+  coordinateLabel: {
     fontSize: 12,
     color: '#666',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  coordinateText: {
+    fontSize: 11,
+    color: '#333',
     fontFamily: 'monospace',
   },
   footer: {

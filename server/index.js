@@ -3,6 +3,7 @@ const cors = require('cors');
 const WebSocket = require('ws');
 const http = require('http');
 const distanceCalculator = require('./services/distanceCalculator');
+const coordinateCalculator = require('./services/coordinateCalculator');
 const notificationManager = require('./services/notificationManager');
 
 const app = express();
@@ -53,6 +54,28 @@ app.post('/webhook', (req, res) => {
 
     // Process detection data
     const notification = notificationManager.createNotification(detectionData);
+    
+    // If vehicle coordinates are provided, calculate pothole coordinates
+    if (detectionData.vehicleCoordinates && notification.pothole) {
+      const vehicleCoord = detectionData.vehicleCoordinates;
+      const nextCoord = detectionData.nextRouteCoordinate || vehicleCoord; // Use next route point if available
+      const distanceMeters = notification.pothole.distance_m || 0;
+      const lateralMeters = notification.pothole.lateral_m || 0;
+      
+      // Calculate pothole coordinates
+      const potholeCoords = coordinateCalculator.calculatePotholeCoordinates(
+        vehicleCoord,
+        nextCoord,
+        distanceMeters,
+        lateralMeters
+      );
+      
+      if (potholeCoords) {
+        notification.pothole.coordinates = potholeCoords;
+        notificationManager.setPotholeCoordinates(notification.id, potholeCoords);
+        console.log('Calculated pothole coordinates:', potholeCoords);
+      }
+    }
     
     // Broadcast to all connected clients
     broadcast({

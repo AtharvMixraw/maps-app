@@ -1,6 +1,6 @@
-import { Video } from 'expo-av';
+import { Video, AVPlaybackStatus } from 'expo-av';
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 
 interface VideoPlayerProps {
   videoUri: string;
@@ -18,39 +18,85 @@ export default function VideoPlayer({
   syncPosition,
 }: VideoPlayerProps) {
   const videoRef = useRef<Video>(null);
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<AVPlaybackStatus | null>(null);
   const [isPaused, setIsPaused] = useState(!isPlaying);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
+  // Handle video source loading
   useEffect(() => {
+    if (!videoUri) {
+      setError('No video URI provided');
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+  }, [videoUri]);
+
+  // Handle play/pause
+  useEffect(() => {
+    if (!videoRef.current || !status?.isLoaded) return;
+
     if (isPlaying && isPaused) {
-      videoRef.current?.playAsync();
+      videoRef.current.playAsync().catch((err) => {
+        console.error('Error playing video:', err);
+        setError('Failed to play video');
+      });
       setIsPaused(false);
     } else if (!isPlaying && !isPaused) {
-      videoRef.current?.pauseAsync();
+      videoRef.current.pauseAsync().catch((err) => {
+        console.error('Error pausing video:', err);
+      });
       setIsPaused(true);
       onPause?.();
     }
-  }, [isPlaying]);
+  }, [isPlaying, status?.isLoaded]);
 
+  // Handle sync position
   useEffect(() => {
-    if (syncPosition !== undefined && status?.isLoaded) {
+    if (syncPosition !== undefined && status?.isLoaded && 'durationMillis' in status) {
       const totalDuration = status.durationMillis || 0;
       const targetTime = syncPosition * totalDuration;
       const currentTime = status.positionMillis || 0;
-      if (Math.abs(currentTime - targetTime) > 100) {
-        videoRef.current?.seekAsync(targetTime);
+      if (Math.abs(currentTime - targetTime) > 100 && totalDuration > 0) {
+        videoRef.current?.setPositionAsync(targetTime).catch((err) => {
+          console.error('Error seeking video:', err);
+        });
       }
     }
   }, [syncPosition, status]);
 
-  const handlePlaybackStatusUpdate = (statusData: any) => {
+  const handlePlaybackStatusUpdate = (statusData: AVPlaybackStatus) => {
     setStatus(statusData);
-    if (statusData.isLoaded) {
+    
+    if ('isLoaded' in statusData && statusData.isLoaded) {
+      setIsLoading(false);
+      setError(null);
+      
       const currentTime = statusData.positionMillis || 0;
       const totalDuration = statusData.durationMillis || 0;
-      onFrameUpdate?.(currentTime, totalDuration);
+      
+      if (totalDuration > 0) {
+        onFrameUpdate?.(currentTime, totalDuration);
+      }
+    } else if ('error' in statusData && statusData.error) {
+      setIsLoading(false);
+      setError(statusData.error);
+      console.error('Video playback error:', statusData.error);
     }
   };
+
+  if (!videoUri) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.placeholder}>
+          <Text style={styles.placeholderText}>No video available</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -60,11 +106,28 @@ export default function VideoPlayer({
         style={styles.video}
         resizeMode="contain"
         isLooping={false}
+        shouldPlay={isPlaying}
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+        useNativeControls={false}
       />
-      {isPaused && (
+      
+      {isLoading && (
         <View style={styles.overlay}>
-          <Text style={styles.pausedText}>Video Paused - Pothole Detected</Text>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Loading video...</Text>
+        </View>
+      )}
+      
+      {error && (
+        <View style={styles.overlay}>
+          <Text style={styles.errorText}>⚠️ {error}</Text>
+        </View>
+      )}
+      
+      {isPaused && !isLoading && !error && (
+        <View style={styles.overlay}>
+          <Text style={styles.pausedText}>⏸ Video Paused</Text>
+          <Text style={styles.pausedSubtext}>Pothole Detected</Text>
         </View>
       )}
     </View>
@@ -78,6 +141,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     borderRadius: 8,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   video: {
     width: '100%',
@@ -89,13 +157,41 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  placeholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+  },
+  placeholderText: {
+    color: '#999',
+    fontSize: 14,
+  },
   pausedText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  pausedSubtext: {
+    color: '#ff6b6b',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 14,
+    marginTop: 10,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
 });

@@ -242,34 +242,97 @@ export default function MapScreen() {
     }
   };
 
+  // Calculate bearing between two coordinates
+  const calculateBearing = (coord1: Coordinate, coord2: Coordinate): number => {
+    const lat1 = (coord1.latitude * Math.PI) / 180;
+    const lat2 = (coord2.latitude * Math.PI) / 180;
+    const dLon = ((coord2.longitude - coord1.longitude) * Math.PI) / 180;
+
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+
+    const bearing = Math.atan2(y, x);
+    return ((bearing * 180) / Math.PI + 360) % 360;
+  };
+
+  // Calculate destination point given start, bearing, and distance
+  const calculateDestination = (start: Coordinate, bearingDeg: number, distanceMeters: number): Coordinate => {
+    const R = 6371e3; // Earth's radius in meters
+    const lat1 = (start.latitude * Math.PI) / 180;
+    const lon1 = (start.longitude * Math.PI) / 180;
+    const bearing = (bearingDeg * Math.PI) / 180;
+
+    const lat2 = Math.asin(
+      Math.sin(lat1) * Math.cos(distanceMeters / R) +
+        Math.cos(lat1) * Math.sin(distanceMeters / R) * Math.cos(bearing)
+    );
+
+    const lon2 =
+      lon1 +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(distanceMeters / R) * Math.cos(lat1),
+        Math.cos(distanceMeters / R) - Math.sin(lat1) * Math.sin(lat2)
+      );
+
+    return {
+      latitude: (lat2 * 180) / Math.PI,
+      longitude: (lon2 * 180) / Math.PI,
+    };
+  };
+
+  // Calculate pothole coordinates from vehicle position, distance, and lateral offset
+  const calculatePotholeCoordinates = (
+    vehicleCoord: Coordinate,
+    nextCoord: Coordinate | null,
+    distanceMeters: number,
+    lateralMeters: number
+  ): Coordinate | null => {
+    if (!vehicleCoord) return null;
+
+    // Use next route point for bearing, or use vehicle position if no next point
+    const bearingPoint = nextCoord || vehicleCoord;
+    const bearing = calculateBearing(vehicleCoord, bearingPoint);
+
+    // Calculate point directly in front at the given distance
+    const forwardPoint = calculateDestination(vehicleCoord, bearing, distanceMeters);
+
+    // Calculate perpendicular bearing for lateral offset
+    const perpendicularBearing = lateralMeters >= 0 
+      ? (bearing + 90) % 360  // Right side
+      : (bearing - 90 + 360) % 360;  // Left side
+
+    // Calculate final pothole position
+    return calculateDestination(forwardPoint, perpendicularBearing, Math.abs(lateralMeters));
+  };
+
   const handlePotholeDetected = (notification: PotholeNotificationData) => {
-    // Pause both map and video
+    // Pause both map and video IMMEDIATELY
     setIsPaused(true);
     isPausedRef.current = true;
     setIsPlaying(false);
     syncService.pause();
     
+    // Stop animation immediately
     if (animationIntervalRef.current) {
       clearInterval(animationIntervalRef.current);
       animationIntervalRef.current = null;
     }
 
-    // Set pothole coordinates to current vehicle position if not set
-    // Set pothole coordinates to the best available source (in order):
-    // 1) coordinates provided by the model in the webhook
-    // 2) map frame->route mapping using total_frames (if provided)
-    // 3) current simulated vehicle position (fallback)
+    // Calculate pothole coordinates from vehicle position, distance, and lateral offset
     let coords = notification.pothole.coordinates || null;
 
-    if (!coords && notification.total_frames && routeCoordinates.length > 0) {
-      // Map frame -> route index
-      const totalFrames = notification.total_frames;
-      const frame = notification.frame || 0;
-      const ratio = Math.max(0, Math.min(1, totalFrames > 0 ? frame / totalFrames : 0));
-      const idx = Math.round(ratio * (routeCoordinates.length - 1));
-      coords = routeCoordinates[Math.max(0, Math.min(routeCoordinates.length - 1, idx))] || null;
+    // If coordinates not provided, calculate them from vehicle position
+    if (!coords && vehiclePosition && notification.pothole.distance_m) {
+      const nextRoutePoint = routeCoordinates[vehicleIndex + 1] || routeCoordinates[vehicleIndex] || vehiclePosition;
+      coords = calculatePotholeCoordinates(
+        vehiclePosition,
+        nextRoutePoint,
+        notification.pothole.distance_m,
+        notification.pothole.lateral_m || 0
+      );
     }
 
+    // Fallback: use current vehicle position if calculation failed
     if (!coords) {
       coords = vehiclePosition;
     }
@@ -290,26 +353,23 @@ export default function MapScreen() {
       return [...prev, notificationWithCoords];
     });
 
-    // Set vehicle coordinates and update distance
-    if (notificationWithCoords.pothole.coordinates) {
-      // Persist the pothole coordinates on the server so all clients have the
-      // exact geo-tag. Use vehiclePosition (if available) as the authoritative
-      // coordinate when pausing on detection.
-      const coordsToPersist = vehiclePosition || notificationWithCoords.pothole.coordinates;
+    // Persist pothole coordinates on server
+    if (coords) {
       try {
         axios.post(`${BACKEND_URL}/set-pothole-coordinates`, {
           notificationId: notification.id,
-          coordinates: coordsToPersist,
+          coordinates: coords,
         }).catch((e) => {
-          // Log but don't block UI
           console.error('Failed to persist pothole coordinates:', e?.message || e);
         });
       } catch (e) {
         console.error('Error calling set-pothole-coordinates:', e);
       }
 
-      // Also send vehicle position to update distance calculations immediately.
-      updateNotificationWithCoordinates(notification.id, vehiclePosition || notificationWithCoords.pothole.coordinates);
+      // Update distance calculations
+      if (vehiclePosition) {
+        updateNotificationWithCoordinates(notification.id, vehiclePosition);
+      }
     }
   };
 
@@ -480,8 +540,19 @@ export default function MapScreen() {
     const animationSpeed = 200; // ms per point
 
     animationIntervalRef.current = setInterval(() => {
+      // Check if paused BEFORE updating state
+      if (isPausedRef.current) {
+        if (animationIntervalRef.current) {
+          clearInterval(animationIntervalRef.current);
+          animationIntervalRef.current = null;
+        }
+        setIsPlaying(false);
+        syncService.setPlaying(false);
+        return;
+      }
+      
       setVehicleIndex((currentIndex) => {
-        // Check if paused or completed using ref
+        // Double-check if paused or completed
         if (isPausedRef.current || currentIndex >= totalPoints - 1) {
           if (animationIntervalRef.current) {
             clearInterval(animationIntervalRef.current);
@@ -694,10 +765,25 @@ export default function MapScreen() {
 
       {/* Info Box */}
       <View style={styles.infoBox}>
-        <Text style={styles.infoText}>From: {currentLocation}</Text>
-        <Text style={styles.infoText}>To: {destination}</Text>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>📍 From:</Text>
+          <Text style={styles.infoValue}>{currentLocation}</Text>
+        </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>🎯 To:</Text>
+          <Text style={styles.infoValue}>{destination}</Text>
+        </View>
         {isPaused && (
-          <Text style={styles.pausedText}>⏸ Paused - Pothole Detected</Text>
+          <View style={styles.pausedBadge}>
+            <Text style={styles.pausedText}>⏸ Paused - Pothole Detected</Text>
+          </View>
+        )}
+        {notifications.length > 0 && (
+          <View style={styles.notificationBadge}>
+            <Text style={styles.notificationBadgeText}>
+              ⚠️ {notifications.length} Pothole{notifications.length > 1 ? 's' : ''} Detected
+            </Text>
+          </View>
         )}
       </View>
 
@@ -755,12 +841,49 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 50,
   },
-  infoText: { fontSize: 14, color: '#333', marginBottom: 5 },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  infoLabel: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '600',
+    marginRight: 6,
+  },
+  infoValue: {
+    fontSize: 13,
+    color: '#333',
+    flex: 1,
+  },
+  pausedBadge: {
+    backgroundColor: '#fff3cd',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ff6b6b',
+  },
   pausedText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#ff6b6b',
     fontWeight: 'bold',
-    marginTop: 5,
+  },
+  notificationBadge: {
+    backgroundColor: '#ffe6e6',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    marginTop: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ff6b6b',
+  },
+  notificationBadgeText: {
+    fontSize: 12,
+    color: '#d32f2f',
+    fontWeight: '600',
   },
   resumeButton: {
     position: 'absolute',
