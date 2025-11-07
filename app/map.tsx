@@ -186,7 +186,7 @@ export default function MapScreen() {
                       notificationId: notification.id,
                       coordinates: coords,
                     }).catch((e) => {
-                      console.error('Failed to persist coordinates via polling:', e);
+                      // Failed to persist coordinates via polling
                     });
                   }
                   
@@ -248,12 +248,12 @@ export default function MapScreen() {
             handleDistanceUpdate(data.data);
           }
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          // Error parsing WebSocket message
         }
       };
 
       ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        // WebSocket error
       };
 
       ws.onclose = () => {
@@ -264,7 +264,7 @@ export default function MapScreen() {
 
       wsRef.current = ws;
     } catch (error) {
-      console.error('Failed to connect WebSocket:', error);
+      // Failed to connect WebSocket
     }
   };
 
@@ -386,8 +386,6 @@ export default function MapScreen() {
       if (coords) {
         console.log('✅ Calculated pothole coordinates:', coords);
         console.log(`   📍 Pothole is ${notification.pothole.distance_m}m ahead, ${Math.abs(notification.pothole.lateral_m || 0)}m ${notification.pothole.lateral_m >= 0 ? 'right' : 'left'}`);
-      } else {
-        console.error('❌ Coordinate calculation returned null');
       }
     } else {
       console.log('⚠️ Cannot calculate coordinates yet:', {
@@ -406,7 +404,7 @@ export default function MapScreen() {
     }
 
     if (!coords) {
-      console.error('❌ No coordinates available for pothole! Will retry when vehicle position is available.');
+      // No coordinates available for pothole - will retry when vehicle position is available
     }
 
     const notificationWithCoords = {
@@ -445,10 +443,10 @@ export default function MapScreen() {
         }).then(() => {
           console.log('✅ Coordinates persisted successfully to server');
         }).catch((e) => {
-          console.error('❌ Failed to persist pothole coordinates:', e?.message || e);
+          // Failed to persist pothole coordinates
         });
       } catch (e) {
-        console.error('❌ Error calling set-pothole-coordinates:', e);
+        // Error calling set-pothole-coordinates
       }
 
       // Update distance calculations
@@ -486,7 +484,7 @@ export default function MapScreen() {
         vehicleCoordinates: coordinates,
       });
     } catch (error) {
-      console.error('Error updating distance:', error);
+      // Error updating distance
     }
   };
 
@@ -532,7 +530,7 @@ export default function MapScreen() {
               }).then(() => {
                 console.log('✅ Recalculated coordinates persisted to server');
               }).catch((e) => {
-                console.error('❌ Failed to persist recalculated coordinates:', e);
+                // Failed to persist recalculated coordinates
               });
               
               return {
@@ -635,7 +633,6 @@ export default function MapScreen() {
       console.log('   Video URL:', googleDriveVideoUrl);
       setVideoUri(googleDriveVideoUrl);
     } catch (err) {
-      console.error('Init error:', err);
       Alert.alert('Error', 'Could not initialize map');
       setLoading(false);
     }
@@ -657,7 +654,6 @@ export default function MapScreen() {
         throw new Error('No results found');
       }
     } catch (err) {
-      console.error('Geocoding error:', err);
       Alert.alert('Error', 'Could not find destination location');
       return null;
     }
@@ -684,7 +680,6 @@ export default function MapScreen() {
         startSynchronizedAnimation(coordinates);
       }
     } catch (error) {
-      console.error('Error fetching route:', error);
       Alert.alert('Route Error', 'Could not fetch route');
     } finally {
       setLoading(false);
