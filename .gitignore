@@ -41,7 +41,12 @@ app-example
 # generated native folders
 /ios
 /android
-<<<<<<< HEAD
-Pothole/
-=======
->>>>>>> origin/main
+
+# Pothole model files (large binaries)
+Pothole/build/
+Pothole/**/*.engine
+Pothole/**/*.onnx
+Pothole/**/*.pt
+Pothole/**/*.mp4
+Pothole/**/*.zip
+Pothole/results.png
