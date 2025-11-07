@@ -5,6 +5,7 @@ const http = require('http');
 const distanceCalculator = require('./services/distanceCalculator');
 const coordinateCalculator = require('./services/coordinateCalculator');
 const notificationManager = require('./services/notificationManager');
+const potholeStorage = require('./services/potholeStorage');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -55,15 +56,16 @@ app.post('/webhook', (req, res) => {
     // Process detection data
     const notification = notificationManager.createNotification(detectionData);
     
-    // If vehicle coordinates are provided, calculate pothole coordinates
+    // Calculate pothole coordinates if vehicle coordinates are provided
+    let potholeCoords = null;
     if (detectionData.vehicleCoordinates && notification.pothole) {
       const vehicleCoord = detectionData.vehicleCoordinates;
-      const nextCoord = detectionData.nextRouteCoordinate || vehicleCoord; // Use next route point if available
+      const nextCoord = detectionData.nextRouteCoordinate || vehicleCoord;
       const distanceMeters = notification.pothole.distance_m || 0;
       const lateralMeters = notification.pothole.lateral_m || 0;
       
       // Calculate pothole coordinates
-      const potholeCoords = coordinateCalculator.calculatePotholeCoordinates(
+      potholeCoords = coordinateCalculator.calculatePotholeCoordinates(
         vehicleCoord,
         nextCoord,
         distanceMeters,
@@ -76,8 +78,53 @@ app.post('/webhook', (req, res) => {
         console.log('Calculated pothole coordinates:', potholeCoords);
       }
     }
+
+    // Check if pothole already exists at this location (only if we have coordinates)
+    if (potholeCoords) {
+      const existingPothole = potholeStorage.findExistingPothole(potholeCoords);
+      
+      if (existingPothole) {
+        // Pothole already exists - increment detection count
+        console.log('Pothole already exists at this location, incrementing detection count');
+        const updated = potholeStorage.incrementDetectionCount(existingPothole.id);
+        
+        // Broadcast existing pothole alert (not a new detection)
+        broadcast({
+          type: 'existing_pothole_alert',
+          data: {
+            ...notification,
+            pothole: {
+              ...notification.pothole,
+              coordinates: existingPothole.coordinates,
+              existing: true,
+              detection_count: updated.detection_count
+            }
+          }
+        });
+
+        return res.status(200).json({ 
+          success: true, 
+          isDuplicate: true,
+          existingPotholeId: existingPothole.id,
+          detectionCount: updated.detection_count
+        });
+      } else {
+        // New pothole - save to persistent storage
+        const saveResult = potholeStorage.addPothole({
+          coordinates: potholeCoords,
+          distance_m: notification.pothole.distance_m,
+          lateral_m: notification.pothole.lateral_m,
+          size: notification.pothole.size,
+          track_id: notification.pothole.track_id
+        });
+
+        if (saveResult.success) {
+          console.log('New pothole saved to persistent storage:', saveResult.pothole.id);
+        }
+      }
+    }
     
-    // Broadcast to all connected clients
+    // Broadcast new pothole detection to all connected clients
     broadcast({
       type: 'pothole_detected',
       data: notification
@@ -85,7 +132,8 @@ app.post('/webhook', (req, res) => {
 
     res.status(200).json({ 
       success: true, 
-      notificationId: notification.id 
+      notificationId: notification.id,
+      isDuplicate: false
     });
   } catch (error) {
     console.error('Error processing webhook:', error);
@@ -220,6 +268,46 @@ app.get('/notifications/:id', (req, res) => {
     res.status(200).json({ success: true, notification });
   } catch (error) {
     console.error('Error fetching notification:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /potholes - Get all persistent pothole locations
+app.get('/potholes', (req, res) => {
+  try {
+    const potholes = potholeStorage.getAllPotholes();
+    res.status(200).json({ success: true, potholes });
+  } catch (error) {
+    console.error('Error fetching potholes:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /potholes/nearby - Get potholes near given coordinates
+app.get('/potholes/nearby', (req, res) => {
+  try {
+    const { latitude, longitude, radius = 1000 } = req.query;
+    
+    if (!latitude || !longitude) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing latitude or longitude' 
+      });
+    }
+
+    const coordinates = {
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude)
+    };
+
+    const potholes = potholeStorage.getPotholesNearby(
+      coordinates, 
+      parseFloat(radius)
+    );
+
+    res.status(200).json({ success: true, potholes });
+  } catch (error) {
+    console.error('Error fetching nearby potholes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

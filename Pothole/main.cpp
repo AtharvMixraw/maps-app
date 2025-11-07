@@ -474,17 +474,18 @@ int main(int argc, char** argv) {
 
         Mat frame;
         int frameCount = 0;
-        bool paused = false;
+        // Removed paused flag - model runs continuously without pausing
 
         cout << "\n==================================================" << endl;
-        cout << "Starting tracking... (SPACEBAR=Pause/Resume, ESC=Exit)" << endl;
+        cout << "Starting continuous tracking... (ESC=Exit)" << endl;
+        cout << "Note: Model runs continuously, no pausing on detection" << endl;
         cout << "==================================================" << endl;
 
         auto startTime = chrono::high_resolution_clock::now();
 
         while (true) {
-            if (!paused) {
-                if (!cap.read(frame)) {
+            // Continuous processing - no pause logic
+            if (!cap.read(frame)) {
                     // End of video reached - loop back to start
                     cout << "\nEnd of video reached. Looping back to start..." << endl;
                     cap.set(cv::CAP_PROP_POS_FRAMES, 0); // Reset to first frame
@@ -567,10 +568,9 @@ int main(int argc, char** argv) {
                 if (!frame_detections.empty()) {
                     streamer.send_batch(frame_detections, frameCount, theta*180.0/M_PI, frame_sizes);
                     
-                    // Pause video when pothole is detected
-                    if (pothole_detected && !paused) {
-                        paused = true;
-                        cout << "\n[PAUSED] Pothole detected at frame " << frameCount << endl;
+                    // Log detection but continue processing (no pause)
+                    if (pothole_detected) {
+                        cout << "\n[DETECTED] Pothole detected at frame " << frameCount << " - continuing..." << endl;
                     }
                 }
 
@@ -592,27 +592,14 @@ int main(int argc, char** argv) {
                          << " (" << (frameCount * 100 / max(1,totalFrames)) << "%) "
                          << "| FPS: " << fixed << setprecision(2) << processingFps << endl;
                 }
-            } else {
-                // Paused - show "PAUSED" overlay
-                putText(frame, "PAUSED (Press SPACEBAR to resume)", Point(frameWidth/2-250, frameHeight/2),
-                        FONT_HERSHEY_SIMPLEX, 1.0, Scalar(0, 0, 255), 3);
-            }
-
             imshow("YOLO + SORT + Distance", frame);
-            int key = waitKey(paused ? 0 : 1);
+            int key = waitKey(1); // Non-blocking wait
             
             if (key == 27) { 
                 cout << "\nESC pressed. Exiting..." << endl;
                 break;
-            } else if (key == 32) {  // SPACEBAR
-                paused = !paused;
-                if (paused) {
-                    cout << "\n[PAUSED] Press SPACEBAR to resume..." << endl;
-                } else {
-                    cout << "[RESUMED]" << endl;
-                    lastTick = chrono::steady_clock::now();
-                }
             }
+            // Removed SPACEBAR pause/resume - model runs continuously
         }
 
         auto endTime = chrono::high_resolution_clock::now();

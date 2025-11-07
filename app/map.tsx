@@ -38,6 +38,8 @@ interface PotholeNotificationData {
     lateral_m: number;
     size: number;
     coordinates: { latitude: number; longitude: number } | null;
+    existing?: boolean; // True if this is an existing pothole (not new detection)
+    detection_count?: number; // How many times this pothole has been detected
   };
   vehicle: {
     coordinates: { latitude: number; longitude: number } | null;
@@ -71,12 +73,10 @@ export default function MapScreen() {
   
   // Video and sync state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null);
   const [videoUri, setVideoUri] = useState<string>('');
   const animationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const distanceUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isPausedRef = useRef<boolean>(false);
   
   // WebSocket and notifications
   const wsRef = useRef<WebSocket | null>(null);
@@ -168,17 +168,7 @@ export default function MapScreen() {
                   updated.push(notificationWithCoords);
                   hasChanges = true;
                   
-                  // Trigger pause if not already paused
-                  if (!isPausedRef.current) {
-                    setIsPaused(true);
-                    isPausedRef.current = true;
-                    setIsPlaying(false);
-                    syncService.pause();
-                    if (animationIntervalRef.current) {
-                      clearInterval(animationIntervalRef.current);
-                      animationIntervalRef.current = null;
-                    }
-                  }
+                  // NO PAUSE - Continue moving, just geo-tag the location
                   
                   // Persist coordinates to server
                   if (coords) {
@@ -241,6 +231,12 @@ export default function MapScreen() {
           
           if (data.type === 'pothole_detected') {
             handlePotholeDetected(data.data);
+          } else if (data.type === 'existing_pothole_alert') {
+            // Existing pothole detected - show alert but don't create new notification
+            handleExistingPotholeAlert(data.data);
+          } else if (data.type === 'nearby_pothole_alert') {
+            // User approaching an existing pothole
+            handleNearbyPotholeAlert(data.data);
           } else if (data.type === 'distance_updated') {
             handleDistanceUpdate(data.data);
           } else if (data.type === 'pothole_updated') {
@@ -266,6 +262,22 @@ export default function MapScreen() {
     } catch (error) {
       // Failed to connect WebSocket
     }
+  };
+
+  // Calculate distance between two coordinates (Haversine formula)
+  const calculateDistance = (coord1: Coordinate, coord2: Coordinate): number => {
+    const R = 6371e3; // Earth's radius in meters
+    const lat1 = (coord1.latitude * Math.PI) / 180;
+    const lat2 = (coord2.latitude * Math.PI) / 180;
+    const dLat = ((coord2.latitude - coord1.latitude) * Math.PI) / 180;
+    const dLon = ((coord2.longitude - coord1.longitude) * Math.PI) / 180;
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
   };
 
   // Calculate bearing between two coordinates
@@ -341,31 +353,11 @@ export default function MapScreen() {
       vehicleIndex,
       routeLength: routeCoordinates.length,
       hasCoordinates: !!notification.pothole.coordinates,
+      isExisting: notification.pothole.existing || false,
     });
 
-    // CRITICAL: Set pause flag FIRST before clearing interval
-    // This prevents any pending interval callbacks from executing
-    isPausedRef.current = true;
-    
-    // Stop animation IMMEDIATELY - clear interval before any state updates
-    if (animationIntervalRef.current) {
-      clearInterval(animationIntervalRef.current);
-      animationIntervalRef.current = null;
-    }
-    
-    // Now update state (after interval is cleared)
-    setIsPaused(true);
-    setIsPlaying(false);
-    syncService.pause();
-    
-    // Lock vehicle position at current index to prevent any drift
-    // The vehicle should stay exactly where it was when pothole was detected
-    if (vehiclePosition && routeCoordinates.length > 0 && vehicleIndex >= 0) {
-      // Ensure vehicle position is exactly at the current route coordinate
-      const lockedPosition = routeCoordinates[vehicleIndex] || vehiclePosition;
-      setVehiclePosition(lockedPosition);
-      console.log('🔒 Locked vehicle position at index:', vehicleIndex, 'Position:', lockedPosition);
-    }
+    // NO PAUSE - Continue moving forward, just geo-tag the location
+    // Vehicle and video continue moving normally
 
     // Calculate pothole coordinates from vehicle position, distance, and lateral offset
     let coords = notification.pothole.coordinates || null;
@@ -470,6 +462,38 @@ export default function MapScreen() {
     }
   };
 
+  const handleExistingPotholeAlert = (notification: PotholeNotificationData) => {
+    // Existing pothole detected - show alert but don't pause
+    console.log('⚠️ Existing pothole detected:', {
+      id: notification.id,
+      coordinates: notification.pothole.coordinates,
+      detection_count: notification.pothole.detection_count,
+    });
+
+    // Add as notification but mark as existing
+    setNotifications((prev) => {
+      const exists = prev.find((n) => n.id === notification.id);
+      if (exists) return prev;
+      return [...prev, notification];
+    });
+  };
+
+  const handleNearbyPotholeAlert = (data: any) => {
+    // User is approaching an existing pothole
+    console.log('📍 Approaching existing pothole:', data);
+    
+    // Show alert notification
+    setNotifications((prev) => {
+      const exists = prev.find((n) => n.id === data.id);
+      if (exists) {
+        // Update distance
+        return prev.map((n) => (n.id === data.id ? { ...n, current_distance: data.current_distance } : n));
+      }
+      // Add new alert
+      return [...prev, data];
+    });
+  };
+
   const handleDistanceUpdate = (notification: PotholeNotificationData) => {
     setNotifications((prev) =>
       prev.map((n) => {
@@ -564,13 +588,72 @@ export default function MapScreen() {
     }
   }, [vehiclePosition, vehicleIndex, routeCoordinates.length, notifications.length]);
 
-  // Start distance update polling for all notifications
+  // Start distance update polling for all notifications and check for nearby potholes
   useEffect(() => {
-    if (notifications.length > 0 && vehiclePosition && !isPaused) {
-      distanceUpdateIntervalRef.current = setInterval(() => {
+    if (vehiclePosition && routeCoordinates.length > 0) {
+      distanceUpdateIntervalRef.current = setInterval(async () => {
+        // Update distances for all notifications
         notifications.forEach((notification) => {
-          updateNotificationWithCoordinates(notification.id, vehiclePosition);
+          if (notification.pothole.coordinates) {
+            updateNotificationWithCoordinates(notification.id, vehiclePosition);
+          }
         });
+
+        // Check for nearby existing potholes (within 50m)
+        try {
+          const response = await axios.get(`${BACKEND_URL}/potholes/nearby`, {
+            params: {
+              latitude: vehiclePosition.latitude,
+              longitude: vehiclePosition.longitude,
+              radius: 50, // Check within 50 meters
+            },
+          });
+
+          if (response.data.success && response.data.potholes) {
+            response.data.potholes.forEach((pothole: any) => {
+              const distance = calculateDistance(
+                vehiclePosition,
+                pothole.coordinates
+              );
+
+              // Alert if within 20 meters
+              if (distance <= 20) {
+                // Check if we already have this pothole in notifications
+                const exists = notifications.find((n) => n.id === pothole.id);
+                if (!exists) {
+                  // Create alert for nearby pothole
+                  const alertData: PotholeNotificationData = {
+                    id: pothole.id,
+                    pothole: {
+                      track_id: pothole.track_id || 0,
+                      distance_m: pothole.distance_m || 0,
+                      lateral_m: pothole.lateral_m || 0,
+                      size: pothole.size || 0,
+                      coordinates: pothole.coordinates,
+                      existing: true,
+                      detection_count: pothole.detection_count || 1,
+                    },
+                    vehicle: {
+                      coordinates: vehiclePosition,
+                    },
+                    current_distance: distance,
+                    timestamp: pothole.updated_at || pothole.detected_at,
+                    frame: 0,
+                    theta_deg: 0,
+                  };
+
+                  setNotifications((prev) => {
+                    const alreadyExists = prev.find((n) => n.id === pothole.id);
+                    if (alreadyExists) return prev;
+                    return [...prev, alertData];
+                  });
+                }
+              }
+            });
+          }
+        } catch (error) {
+          // Failed to check nearby potholes
+        }
       }, 1000); // Update every second
     }
     return () => {
@@ -578,7 +661,7 @@ export default function MapScreen() {
         clearInterval(distanceUpdateIntervalRef.current);
       }
     };
-  }, [notifications, vehiclePosition, isPaused]);
+  }, [notifications, vehiclePosition, routeCoordinates.length]);
 
   // Accept video frame/time updates from the VideoPlayer so we can use
   // totalDuration or progress if needed for mapping (fallbacks)
@@ -627,6 +710,38 @@ export default function MapScreen() {
       setDestinationCoords(destCoords);
 
       await getRoute(currentCoords, destCoords);
+      
+      // Load existing potholes from persistent storage
+      try {
+        const response = await axios.get(`${BACKEND_URL}/potholes`);
+        if (response.data.success && response.data.potholes) {
+          const existingPotholes = response.data.potholes.map((pothole: any) => ({
+            id: pothole.id,
+            pothole: {
+              track_id: pothole.track_id || 0,
+              distance_m: pothole.distance_m || 0,
+              lateral_m: pothole.lateral_m || 0,
+              size: pothole.size || 0,
+              coordinates: pothole.coordinates,
+            },
+            vehicle: {
+              coordinates: null,
+            },
+            current_distance: 0,
+            timestamp: pothole.detected_at || pothole.updated_at,
+            frame: 0,
+            theta_deg: 0,
+            existing: true,
+            detection_count: pothole.detection_count || 1,
+          }));
+          
+          // Add existing potholes to notifications (they'll show on map)
+          setNotifications(existingPotholes);
+          console.log(`✅ Loaded ${existingPotholes.length} existing potholes from storage`);
+        }
+      } catch (error) {
+        console.log('Could not load existing potholes:', error);
+      }
       
       // Load video from Google Drive
       // Convert Google Drive sharing link to direct stream URL
@@ -707,35 +822,14 @@ export default function MapScreen() {
     
     // Start both map and video simultaneously
     setIsPlaying(true);
-    setIsPaused(false);
-    isPausedRef.current = false;
     syncService.setPlaying(true);
     
     const totalPoints = coordinates.length;
     const animationSpeed = 200; // ms per point
 
     animationIntervalRef.current = setInterval(() => {
-      // CRITICAL: Check pause flag FIRST, before any state updates
-      // This must be the very first check to prevent any movement when paused
-      if (isPausedRef.current) {
-        // Clear interval immediately if paused
-        if (animationIntervalRef.current) {
-          clearInterval(animationIntervalRef.current);
-          animationIntervalRef.current = null;
-        }
-        setIsPlaying(false);
-        syncService.setPlaying(false);
-        return; // Exit immediately, don't update any state
-      }
-      
-      // Only proceed if NOT paused
+      // Continue animation - no pause checks needed
       setVehicleIndex((currentIndex) => {
-        // Double-check pause flag again inside state updater (defense in depth)
-        if (isPausedRef.current) {
-          // If paused during state update, don't update position
-          return currentIndex;
-        }
-        
         // Check if completed - loop back to start if video is looping
         if (currentIndex >= totalPoints - 1) {
           // Loop back to start to match video looping
@@ -762,31 +856,7 @@ export default function MapScreen() {
     }, animationSpeed);
   };
 
-  const handleVideoPause = () => {
-    // Video paused (pothole detected)
-    setIsPaused(true);
-    isPausedRef.current = true;
-    setIsPlaying(false);
-    syncService.pause();
-    
-    if (animationIntervalRef.current) {
-      clearInterval(animationIntervalRef.current);
-      animationIntervalRef.current = null;
-    }
-  };
-
-  const handleResume = () => {
-    if (routeCoordinates.length > 0 && vehicleIndex < routeCoordinates.length) {
-      setIsPaused(false);
-      isPausedRef.current = false;
-      setIsPlaying(true);
-      syncService.resume();
-      
-      // Resume animation from current position
-      const remainingCoordinates = routeCoordinates.slice(vehicleIndex);
-      startSynchronizedAnimation(remainingCoordinates);
-    }
-  };
+  // Removed handleVideoPause and handleResume - no pausing on pothole detection
 
   const dismissNotification = (id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
@@ -937,7 +1007,6 @@ export default function MapScreen() {
           <VideoPlayer
             videoUri={videoUri}
             isPlaying={isPlaying}
-            onPause={handleVideoPause}
             onFrameUpdate={handleVideoFrameUpdate}
             syncPosition={getVideoSyncPosition()}
           />
@@ -971,11 +1040,6 @@ export default function MapScreen() {
           <Text style={styles.infoLabel}>🎯 To:</Text>
           <Text style={styles.infoValue}>{destination}</Text>
         </View>
-        {isPaused && (
-          <View style={styles.pausedBadge}>
-            <Text style={styles.pausedText}>⏸ Paused - Pothole Detected</Text>
-          </View>
-        )}
         {notifications.length > 0 && (
           <View style={styles.notificationBadge}>
             <Text style={styles.notificationBadgeText}>
@@ -985,12 +1049,6 @@ export default function MapScreen() {
         )}
       </View>
 
-      {/* Control Buttons */}
-      {isPaused && (
-        <TouchableOpacity style={styles.resumeButton} onPress={handleResume}>
-          <Text style={styles.resumeButtonText}>▶ Resume</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 }
