@@ -1,13 +1,13 @@
+import { Video } from 'expo-av';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { StyleSheet, Text, View } from 'react-native';
 
 interface VideoPlayerProps {
   videoUri: string;
   isPlaying: boolean;
   onPause?: () => void;
   onFrameUpdate?: (currentTime: number, totalDuration: number) => void;
-  syncPosition?: number; // 0-1, for synchronization with map
+  syncPosition?: number;
 }
 
 export default function VideoPlayer({
@@ -18,7 +18,7 @@ export default function VideoPlayer({
   syncPosition,
 }: VideoPlayerProps) {
   const videoRef = useRef<Video>(null);
-  const [status, setStatus] = useState<AVPlaybackStatus | null>(null);
+  const [status, setStatus] = useState<any>(null);
   const [isPaused, setIsPaused] = useState(!isPlaying);
 
   useEffect(() => {
@@ -37,20 +37,17 @@ export default function VideoPlayer({
       const totalDuration = status.durationMillis || 0;
       const targetTime = syncPosition * totalDuration;
       const currentTime = status.positionMillis || 0;
-      
-      // Only seek if difference is significant (more than 100ms)
       if (Math.abs(currentTime - targetTime) > 100) {
-        videoRef.current?.setPositionAsync(targetTime);
+        videoRef.current?.seekAsync(targetTime);
       }
     }
   }, [syncPosition, status]);
 
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    setStatus(status);
-    
-    if (status.isLoaded) {
-      const currentTime = status.positionMillis || 0;
-      const totalDuration = status.durationMillis || 0;
+  const handlePlaybackStatusUpdate = (statusData: any) => {
+    setStatus(statusData);
+    if (statusData.isLoaded) {
+      const currentTime = statusData.positionMillis || 0;
+      const totalDuration = statusData.durationMillis || 0;
       onFrameUpdate?.(currentTime, totalDuration);
     }
   };
@@ -61,7 +58,7 @@ export default function VideoPlayer({
         ref={videoRef}
         source={{ uri: videoUri }}
         style={styles.video}
-        resizeMode={ResizeMode.CONTAIN}
+        resizeMode="contain"
         isLooping={false}
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
       />
@@ -102,4 +99,3 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-

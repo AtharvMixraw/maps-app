@@ -41,8 +41,14 @@ function createNotification(detectionData) {
     },
     current_distance: potholeData.distance_m,
     timestamp: new Date().toISOString(),
+    // Preserve any additional metadata from the detection payload so clients
+    // can use it for more accurate geo-tagging (e.g. frame->route mapping).
     frame: detectionData.frame || 0,
-    theta_deg: detectionData.theta_deg || 0
+    theta_deg: detectionData.theta_deg || 0,
+    // optional video metadata that the C++ model may send
+    video_fps: detectionData.video_fps || null,
+    total_frames: detectionData.total_frames || null,
+    timestamp_ms: detectionData.timestamp_ms || null
   };
 
   notifications.set(id, notification);
@@ -71,6 +77,17 @@ function updateDistance(notificationId, currentDistance, vehicleCoordinates) {
   return notification;
 }
 
+function setPotholeCoordinates(notificationId, coordinates) {
+  const notification = notifications.get(notificationId);
+  if (!notification) return null;
+
+  notification.pothole.coordinates = coordinates;
+  notification.updated_at = new Date().toISOString();
+
+  notifications.set(notificationId, notification);
+  return notification;
+}
+
 function deleteNotification(id) {
   return notifications.delete(id);
 }
@@ -84,6 +101,7 @@ module.exports = {
   getNotification,
   getAllNotifications,
   updateDistance,
+  setPotholeCoordinates,
   deleteNotification,
   clearAllNotifications
 };

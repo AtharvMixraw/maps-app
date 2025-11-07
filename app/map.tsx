@@ -45,6 +45,10 @@ interface PotholeNotificationData {
   current_distance: number;
   timestamp: string;
   frame: number;
+  // optional metadata provided by the model/webhook (top-level)
+  video_fps?: number | null;
+  total_frames?: number | null;
+  timestamp_ms?: number | null;
   theta_deg: number;
 }
 
@@ -68,9 +72,10 @@ export default function MapScreen() {
   // Video and sync state
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null);
   const [videoUri, setVideoUri] = useState<string>('');
-  const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const distanceUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const animationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const distanceUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isPausedRef = useRef<boolean>(false);
   
   // WebSocket and notifications
@@ -82,16 +87,16 @@ export default function MapScreen() {
   const getBackendUrl = () => {
     if (Platform.OS === 'android') {
       // Android emulator
-      return 'http://10.0.2.2:5001';
+      return 'https://nonsatirizing-kevin-unlured.ngrok-free.dev';
     }
-    return 'http://localhost:5001';
+    return 'https://nonsatirizing-kevin-unlured.ngrok-free.dev';
   };
   const getWebSocketUrl = () => {
     if (Platform.OS === 'android') {
       // Android emulator
-      return 'ws://10.0.2.2:5001';
+      return 'ws://nonsatirizing-kevin-unlured.ngrok-free.dev';
     }
-    return 'ws://localhost:5001';
+    return 'ws://nonsatirizing-kevin-unlured.ngrok-free.dev';
   };
   const BACKEND_URL = getBackendUrl();
   const WS_URL = getWebSocketUrl();
@@ -132,11 +137,22 @@ export default function MapScreen() {
               if (existingIndex === -1) {
                 // New notification - get current vehicle position
                 setVehiclePosition((currentPos) => {
+                  // Determine best coordinates for notification (same logic as WS handler)
+                  let coords = notification.pothole.coordinates || null;
+                  if (!coords && notification.total_frames && routeCoordinates.length > 0) {
+                    const totalFrames = notification.total_frames;
+                    const frame = notification.frame || 0;
+                    const ratio = Math.max(0, Math.min(1, totalFrames > 0 ? frame / totalFrames : 0));
+                    const idx = Math.round(ratio * (routeCoordinates.length - 1));
+                    coords = routeCoordinates[Math.max(0, Math.min(routeCoordinates.length - 1, idx))] || null;
+                  }
+                  if (!coords) coords = currentPos;
+
                   const notificationWithCoords = {
                     ...notification,
                     pothole: {
                       ...notification.pothole,
-                      coordinates: notification.pothole.coordinates || currentPos,
+                      coordinates: coords,
                     },
                   };
                   
@@ -201,6 +217,9 @@ export default function MapScreen() {
             handlePotholeDetected(data.data);
           } else if (data.type === 'distance_updated') {
             handleDistanceUpdate(data.data);
+          } else if (data.type === 'pothole_updated') {
+            // Pothole coordinates or metadata updated on server
+            handleDistanceUpdate(data.data);
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -236,11 +255,30 @@ export default function MapScreen() {
     }
 
     // Set pothole coordinates to current vehicle position if not set
+    // Set pothole coordinates to the best available source (in order):
+    // 1) coordinates provided by the model in the webhook
+    // 2) map frame->route mapping using total_frames (if provided)
+    // 3) current simulated vehicle position (fallback)
+    let coords = notification.pothole.coordinates || null;
+
+    if (!coords && notification.total_frames && routeCoordinates.length > 0) {
+      // Map frame -> route index
+      const totalFrames = notification.total_frames;
+      const frame = notification.frame || 0;
+      const ratio = Math.max(0, Math.min(1, totalFrames > 0 ? frame / totalFrames : 0));
+      const idx = Math.round(ratio * (routeCoordinates.length - 1));
+      coords = routeCoordinates[Math.max(0, Math.min(routeCoordinates.length - 1, idx))] || null;
+    }
+
+    if (!coords) {
+      coords = vehiclePosition;
+    }
+
     const notificationWithCoords = {
       ...notification,
       pothole: {
         ...notification.pothole,
-        coordinates: notification.pothole.coordinates || vehiclePosition,
+        coordinates: coords,
       },
     };
 
@@ -253,8 +291,25 @@ export default function MapScreen() {
     });
 
     // Set vehicle coordinates and update distance
-    if (vehiclePosition) {
-      updateNotificationWithCoordinates(notification.id, vehiclePosition);
+    if (notificationWithCoords.pothole.coordinates) {
+      // Persist the pothole coordinates on the server so all clients have the
+      // exact geo-tag. Use vehiclePosition (if available) as the authoritative
+      // coordinate when pausing on detection.
+      const coordsToPersist = vehiclePosition || notificationWithCoords.pothole.coordinates;
+      try {
+        axios.post(`${BACKEND_URL}/set-pothole-coordinates`, {
+          notificationId: notification.id,
+          coordinates: coordsToPersist,
+        }).catch((e) => {
+          // Log but don't block UI
+          console.error('Failed to persist pothole coordinates:', e?.message || e);
+        });
+      } catch (e) {
+        console.error('Error calling set-pothole-coordinates:', e);
+      }
+
+      // Also send vehicle position to update distance calculations immediately.
+      updateNotificationWithCoordinates(notification.id, vehiclePosition || notificationWithCoords.pothole.coordinates);
     }
   };
 
@@ -284,13 +339,24 @@ export default function MapScreen() {
         });
       }, 1000); // Update every second
     }
-
     return () => {
       if (distanceUpdateIntervalRef.current) {
         clearInterval(distanceUpdateIntervalRef.current);
       }
     };
   }, [notifications, vehiclePosition, isPaused]);
+
+  // Accept video frame/time updates from the VideoPlayer so we can use
+  // totalDuration or progress if needed for mapping (fallbacks)
+  const handleVideoFrameUpdate = (currentTimeMs: number, totalDurationMs: number) => {
+    if (totalDurationMs && totalDurationMs > 0) {
+      setVideoDurationMs(totalDurationMs);
+      // Update sync service video progress from video player
+      const videoProgress = currentTimeMs / totalDurationMs;
+      syncService.setVideoProgress(videoProgress);
+    }
+  };
+
 
   const initializeMap = async () => {
     try {
@@ -603,6 +669,7 @@ export default function MapScreen() {
             videoUri={videoUri}
             isPlaying={isPlaying}
             onPause={handleVideoPause}
+            onFrameUpdate={handleVideoFrameUpdate}
             syncPosition={getVideoSyncPosition()}
           />
         </View>

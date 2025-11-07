@@ -90,6 +90,36 @@ app.post('/update-distance', async (req, res) => {
       });
     }
 
+    // Helper: validate coordinate object
+    const isValidCoord = (c) => {
+      return c && typeof c.latitude === 'number' && typeof c.longitude === 'number' && isFinite(c.latitude) && isFinite(c.longitude);
+    };
+
+    // If pothole coordinates are not yet known (null), update only the
+    // vehicle coordinates on the notification and broadcast the change.
+    // This avoids calling the distance calculator with a null coordinate.
+    if (!notification.pothole || !isValidCoord(notification.pothole.coordinates)) {
+      const updatedNotification = notificationManager.updateDistance(
+        notificationId,
+        notification.current_distance,
+        vehicleCoordinates
+      );
+
+      // Broadcast update to all connected clients
+      broadcast({
+        type: 'distance_updated',
+        data: updatedNotification
+      });
+
+      return res.status(200).json({ success: true, notification: updatedNotification });
+    }
+
+    // Ensure vehicleCoordinates is valid
+    if (!isValidCoord(vehicleCoordinates)) {
+      // Bad input from client
+      return res.status(400).json({ success: false, error: 'Invalid vehicleCoordinates' });
+    }
+
     // Calculate current distance
     const currentDistance = distanceCalculator.calculateDistance(
       vehicleCoordinates,
@@ -115,6 +145,33 @@ app.post('/update-distance', async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating distance:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /set-pothole-coordinates - Set persisted pothole coordinates for a notification
+app.post('/set-pothole-coordinates', (req, res) => {
+  try {
+    const { notificationId, coordinates } = req.body;
+
+    if (!notificationId || !coordinates) {
+      return res.status(400).json({ success: false, error: 'Missing notificationId or coordinates' });
+    }
+
+    const updatedNotification = notificationManager.setPotholeCoordinates(notificationId, coordinates);
+    if (!updatedNotification) {
+      return res.status(404).json({ success: false, error: 'Notification not found' });
+    }
+
+    // Broadcast update to all connected clients
+    broadcast({
+      type: 'pothole_updated',
+      data: updatedNotification
+    });
+
+    res.status(200).json({ success: true, notification: updatedNotification });
+  } catch (error) {
+    console.error('Error setting pothole coordinates:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
