@@ -825,7 +825,7 @@ export default function MapScreen() {
     syncService.setPlaying(true);
     
     const totalPoints = coordinates.length;
-    const animationSpeed = 200; // ms per point
+    const animationSpeed = 5; // ms per point
 
     animationIntervalRef.current = setInterval(() => {
       // Continue animation - no pause checks needed
