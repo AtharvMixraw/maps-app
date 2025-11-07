@@ -485,8 +485,16 @@ int main(int argc, char** argv) {
         while (true) {
             if (!paused) {
                 if (!cap.read(frame)) {
-                    cout << "\nEnd of video reached." << endl;
-                    break;
+                    // End of video reached - loop back to start
+                    cout << "\nEnd of video reached. Looping back to start..." << endl;
+                    cap.set(cv::CAP_PROP_POS_FRAMES, 0); // Reset to first frame
+                    frameCount = 0; // Reset frame counter
+                    // Reset tracker for new loop
+                    tracker = make_shared<Sort>(30, 3, 0.3f);
+                    // Reinitialize theta fuser
+                    thetaFuser.initialize_from_imu(theta0_rad);
+                    cout << "Video looped - restarting detection..." << endl;
+                    continue; // Continue to next iteration to read first frame
                 }
                 frameCount++;
 
