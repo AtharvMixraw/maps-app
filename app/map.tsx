@@ -825,7 +825,7 @@ export default function MapScreen() {
     syncService.setPlaying(true);
     
     const totalPoints = coordinates.length;
-    const animationSpeed = 5; // ms per point
+    const animationSpeed = 500; // ms per point
 
     animationIntervalRef.current = setInterval(() => {
       // Continue animation - no pause checks needed
@@ -1043,7 +1043,7 @@ export default function MapScreen() {
         {notifications.length > 0 && (
           <View style={styles.notificationBadge}>
             <Text style={styles.notificationBadgeText}>
-              ⚠️ {notifications.length} Pothole{notifications.length > 1 ? 's' : ''} Detected
+              ⚠️ Pothole(s) Detected
             </Text>
           </View>
         )}
