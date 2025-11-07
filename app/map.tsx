@@ -135,18 +135,27 @@ export default function MapScreen() {
             newNotifications.forEach((notification: PotholeNotificationData) => {
               const existingIndex = updated.findIndex((n) => n.id === notification.id);
               if (existingIndex === -1) {
-                // New notification - get current vehicle position
+                // New notification - calculate coordinates properly
                 setVehiclePosition((currentPos) => {
-                  // Determine best coordinates for notification (same logic as WS handler)
                   let coords = notification.pothole.coordinates || null;
-                  if (!coords && notification.total_frames && routeCoordinates.length > 0) {
-                    const totalFrames = notification.total_frames;
-                    const frame = notification.frame || 0;
-                    const ratio = Math.max(0, Math.min(1, totalFrames > 0 ? frame / totalFrames : 0));
-                    const idx = Math.round(ratio * (routeCoordinates.length - 1));
-                    coords = routeCoordinates[Math.max(0, Math.min(routeCoordinates.length - 1, idx))] || null;
+
+                  // Calculate coordinates from vehicle position, distance, and lateral offset
+                  if (!coords && currentPos && notification.pothole.distance_m !== undefined) {
+                    const currentVehicleIndex = vehicleIndex;
+                    const nextRoutePoint = routeCoordinates[currentVehicleIndex + 1] || routeCoordinates[currentVehicleIndex] || currentPos;
+                    
+                    coords = calculatePotholeCoordinates(
+                      currentPos,
+                      nextRoutePoint,
+                      notification.pothole.distance_m,
+                      notification.pothole.lateral_m || 0
+                    );
                   }
-                  if (!coords) coords = currentPos;
+
+                  // Fallback: use vehicle position if calculation failed
+                  if (!coords && currentPos) {
+                    coords = currentPos;
+                  }
 
                   const notificationWithCoords = {
                     ...notification,
@@ -171,7 +180,17 @@ export default function MapScreen() {
                     }
                   }
                   
-                  // Update coordinates
+                  // Persist coordinates to server
+                  if (coords) {
+                    axios.post(`${BACKEND_URL}/set-pothole-coordinates`, {
+                      notificationId: notification.id,
+                      coordinates: coords,
+                    }).catch((e) => {
+                      console.error('Failed to persist coordinates via polling:', e);
+                    });
+                  }
+                  
+                  // Update distance calculations
                   if (currentPos) {
                     updateNotificationWithCoordinates(notification.id, currentPos);
                   }
@@ -179,8 +198,15 @@ export default function MapScreen() {
                   return currentPos;
                 });
               } else if (updated[existingIndex].current_distance !== notification.current_distance) {
-                // Distance updated
-                updated[existingIndex] = notification;
+                // Distance updated - also update coordinates if they changed
+                const updatedNotification = {
+                  ...notification,
+                  pothole: {
+                    ...notification.pothole,
+                    coordinates: notification.pothole.coordinates || updated[existingIndex].pothole.coordinates,
+                  },
+                };
+                updated[existingIndex] = updatedNotification;
                 hasChanges = true;
               }
             });
@@ -306,6 +332,17 @@ export default function MapScreen() {
   };
 
   const handlePotholeDetected = (notification: PotholeNotificationData) => {
+    console.log('🔴 Pothole detected:', {
+      id: notification.id,
+      distance: notification.pothole.distance_m,
+      lateral: notification.pothole.lateral_m,
+      size: notification.pothole.size,
+      vehiclePosition,
+      vehicleIndex,
+      routeLength: routeCoordinates.length,
+      hasCoordinates: !!notification.pothole.coordinates,
+    });
+
     // Pause both map and video IMMEDIATELY
     setIsPaused(true);
     isPausedRef.current = true;
@@ -321,20 +358,55 @@ export default function MapScreen() {
     // Calculate pothole coordinates from vehicle position, distance, and lateral offset
     let coords = notification.pothole.coordinates || null;
 
-    // If coordinates not provided, calculate them from vehicle position
-    if (!coords && vehiclePosition && notification.pothole.distance_m) {
-      const nextRoutePoint = routeCoordinates[vehicleIndex + 1] || routeCoordinates[vehicleIndex] || vehiclePosition;
+    // CRITICAL: Always calculate coordinates if we have vehicle position and distance
+    // The pothole is detected "d" meters ahead and "x" meters lateral
+    if (!coords && vehiclePosition && notification.pothole.distance_m !== undefined && notification.pothole.distance_m > 0) {
+      // Get the next point on the route for bearing calculation
+      const nextRoutePoint = routeCoordinates[vehicleIndex + 1] || 
+                            routeCoordinates[vehicleIndex] || 
+                            vehiclePosition;
+      
+      console.log('📍 Calculating coordinates from detection:', {
+        vehiclePosition,
+        vehicleIndex,
+        nextRoutePoint,
+        distance_m: notification.pothole.distance_m,
+        lateral_m: notification.pothole.lateral_m || 0,
+        size: notification.pothole.size,
+      });
+      
+      // Calculate: pothole is "distance_m" meters ahead, then "lateral_m" meters to the side
       coords = calculatePotholeCoordinates(
         vehiclePosition,
         nextRoutePoint,
-        notification.pothole.distance_m,
-        notification.pothole.lateral_m || 0
+        notification.pothole.distance_m,  // Distance ahead (2.29m in your example)
+        notification.pothole.lateral_m || 0  // Lateral offset (1.39m in your example)
       );
+      
+      if (coords) {
+        console.log('✅ Calculated pothole coordinates:', coords);
+        console.log(`   📍 Pothole is ${notification.pothole.distance_m}m ahead, ${Math.abs(notification.pothole.lateral_m || 0)}m ${notification.pothole.lateral_m >= 0 ? 'right' : 'left'}`);
+      } else {
+        console.error('❌ Coordinate calculation returned null');
+      }
+    } else {
+      console.log('⚠️ Cannot calculate coordinates yet:', {
+        hasCoords: !!coords,
+        hasVehiclePosition: !!vehiclePosition,
+        hasDistance: notification.pothole.distance_m !== undefined,
+        distanceValue: notification.pothole.distance_m,
+      });
     }
 
     // Fallback: use current vehicle position if calculation failed
-    if (!coords) {
+    // (This is a last resort - better to wait for proper calculation)
+    if (!coords && vehiclePosition) {
+      console.log('⚠️ Using vehicle position as fallback (pothole should be ahead but using current position)');
       coords = vehiclePosition;
+    }
+
+    if (!coords) {
+      console.error('❌ No coordinates available for pothole! Will retry when vehicle position is available.');
     }
 
     const notificationWithCoords = {
@@ -345,37 +417,65 @@ export default function MapScreen() {
       },
     };
 
-    // Add notification
+    console.log('📌 Final notification with coordinates:', {
+      id: notificationWithCoords.id,
+      hasCoordinates: !!notificationWithCoords.pothole.coordinates,
+      coordinates: notificationWithCoords.pothole.coordinates,
+    });
+
+    // Add notification (even without coordinates - will be calculated later)
     setNotifications((prev) => {
       // Check if notification already exists
       const exists = prev.find((n) => n.id === notification.id);
-      if (exists) return prev;
+      if (exists) {
+        console.log('⚠️ Notification already exists, updating with coordinates...');
+        return prev.map((n) => (n.id === notification.id ? notificationWithCoords : n));
+      }
+      console.log('✅ Adding new notification to state');
       return [...prev, notificationWithCoords];
     });
 
-    // Persist pothole coordinates on server
-    if (coords) {
+    // Persist pothole coordinates on server if we have them
+    if (coords && coords.latitude && coords.longitude) {
+      console.log('💾 Persisting coordinates to server:', coords);
       try {
         axios.post(`${BACKEND_URL}/set-pothole-coordinates`, {
           notificationId: notification.id,
           coordinates: coords,
+        }).then(() => {
+          console.log('✅ Coordinates persisted successfully to server');
         }).catch((e) => {
-          console.error('Failed to persist pothole coordinates:', e?.message || e);
+          console.error('❌ Failed to persist pothole coordinates:', e?.message || e);
         });
       } catch (e) {
-        console.error('Error calling set-pothole-coordinates:', e);
+        console.error('❌ Error calling set-pothole-coordinates:', e);
       }
 
       // Update distance calculations
       if (vehiclePosition) {
         updateNotificationWithCoordinates(notification.id, vehiclePosition);
       }
+    } else {
+      console.warn('⚠️ Cannot persist: coordinates not yet calculated. Will retry when vehicle position is available.');
     }
   };
 
   const handleDistanceUpdate = (notification: PotholeNotificationData) => {
     setNotifications((prev) =>
-      prev.map((n) => (n.id === notification.id ? notification : n))
+      prev.map((n) => {
+        if (n.id === notification.id) {
+          // Preserve existing coordinates if new notification doesn't have them
+          const updatedNotification = {
+            ...notification,
+            pothole: {
+              ...notification.pothole,
+              coordinates: notification.pothole.coordinates || n.pothole.coordinates,
+            },
+          };
+          return updatedNotification;
+        }
+        return n;
+      })
     );
   };
 
@@ -389,6 +489,70 @@ export default function MapScreen() {
       console.error('Error updating distance:', error);
     }
   };
+
+  // Recalculate coordinates for notifications that don't have them yet
+  // This ensures coordinates are calculated even if vehicle position wasn't available when detection arrived
+  useEffect(() => {
+    if (notifications.length > 0 && vehiclePosition && routeCoordinates.length > 0) {
+      setNotifications((prev) => {
+        let hasChanges = false;
+        const updated = prev.map((notification) => {
+          // If notification doesn't have coordinates, calculate them NOW
+          if (!notification.pothole.coordinates && 
+              notification.pothole.distance_m !== undefined && 
+              notification.pothole.distance_m > 0) {
+            
+            const nextRoutePoint = routeCoordinates[vehicleIndex + 1] || 
+                                  routeCoordinates[vehicleIndex] || 
+                                  vehiclePosition;
+            
+            console.log('🔄 Recalculating coordinates for notification:', {
+              id: notification.id,
+              vehiclePosition,
+              vehicleIndex,
+              distance: notification.pothole.distance_m,
+              lateral: notification.pothole.lateral_m || 0,
+            });
+            
+            const coords = calculatePotholeCoordinates(
+              vehiclePosition,
+              nextRoutePoint,
+              notification.pothole.distance_m,
+              notification.pothole.lateral_m || 0
+            );
+            
+            if (coords && coords.latitude && coords.longitude) {
+              hasChanges = true;
+              console.log('✅ Recalculated coordinates:', coords);
+              
+              // Persist to server
+              axios.post(`${BACKEND_URL}/set-pothole-coordinates`, {
+                notificationId: notification.id,
+                coordinates: coords,
+              }).then(() => {
+                console.log('✅ Recalculated coordinates persisted to server');
+              }).catch((e) => {
+                console.error('❌ Failed to persist recalculated coordinates:', e);
+              });
+              
+              return {
+                ...notification,
+                pothole: {
+                  ...notification.pothole,
+                  coordinates: coords,
+                },
+              };
+            } else {
+              console.warn('⚠️ Recalculation returned invalid coordinates');
+            }
+          }
+          return notification;
+        });
+        
+        return hasChanges ? updated : prev;
+      });
+    }
+  }, [vehiclePosition, vehicleIndex, routeCoordinates.length, notifications.length]);
 
   // Start distance update polling for all notifications
   useEffect(() => {
@@ -712,18 +876,28 @@ export default function MapScreen() {
 
         {/* Pothole markers from notifications */}
         {notifications.map((notification) => {
-          if (notification.pothole.coordinates) {
+          const coords = notification.pothole.coordinates;
+          if (coords && coords.latitude && coords.longitude) {
+            console.log('🗺️ Rendering pothole marker:', {
+              id: notification.id,
+              coords,
+            });
             return (
               <Marker
                 key={notification.id}
-                coordinate={notification.pothole.coordinates}
-                title="Pothole"
-                description={`${notification.current_distance.toFixed(1)}m away`}
+                coordinate={coords}
+                title="⚠️ Pothole Detected"
+                description={`${notification.current_distance.toFixed(1)}m away | Size: ${notification.pothole.size?.toFixed(2) || 'N/A'} m²`}
                 pinColor="orange"
               />
             );
+          } else {
+            console.warn('⚠️ Notification missing coordinates:', {
+              id: notification.id,
+              coords,
+            });
+            return null;
           }
-          return null;
         })}
       </MapView>
     );
