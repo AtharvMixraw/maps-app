@@ -10,6 +10,7 @@ const distanceCalculator = require('./distanceCalculator');
 const STORAGE_FILE = path.join(__dirname, '../../data/potholes.json');
 const DUPLICATE_THRESHOLD_METERS = 5; // Consider potholes within 5m as duplicates
 const TOO_CLOSE_THRESHOLD_METERS = 0.02; // 2 cm - don't increment count if within this distance
+const DETECTIONS_PER_COUNT_INCREMENT = 10; // Increment detection_count only after 10 detections
 
 // Ensure data directory exists
 const dataDir = path.dirname(STORAGE_FILE);
@@ -94,7 +95,8 @@ function addPothole(potholeData) {
     track_id: track_id || 0,
     detected_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-    detection_count: 1 // How many times this pothole has been detected
+    detection_count: 1, // How many times this pothole has been detected (incremented every 10 detections)
+    pending_detections: 1 // Buffer to track detections before incrementing count
   };
 
   // Load existing potholes and add new one
@@ -112,6 +114,7 @@ function addPothole(potholeData) {
 
 // Update detection count for existing pothole
 // Only increments if the new detection coordinates are more than 2 cm away
+// Increments detection_count only after 10 detections (pending_detections buffer)
 function incrementDetectionCount(potholeId, newCoordinates = null) {
   const potholes = loadPotholes();
   const index = potholes.findIndex(p => p.id === potholeId);
@@ -131,8 +134,23 @@ function incrementDetectionCount(potholeId, newCoordinates = null) {
       }
     }
     
-    // Increment count (either no coordinates provided, or distance > 2 cm)
-    potholes[index].detection_count = (potholes[index].detection_count || 1) + 1;
+    // Initialize pending_detections if it doesn't exist (for old potholes)
+    if (potholes[index].pending_detections === undefined) {
+      potholes[index].pending_detections = 0;
+    }
+    
+    // Increment pending detections buffer
+    potholes[index].pending_detections = (potholes[index].pending_detections || 0) + 1;
+    
+    // Only increment detection_count when we reach 10 detections
+    if (potholes[index].pending_detections >= DETECTIONS_PER_COUNT_INCREMENT) {
+      potholes[index].detection_count = (potholes[index].detection_count || 1) + 1;
+      potholes[index].pending_detections = 0; // Reset buffer
+      console.log(`Reached ${DETECTIONS_PER_COUNT_INCREMENT} detections, incrementing detection_count to ${potholes[index].detection_count}`);
+    } else {
+      console.log(`Detection added to buffer: ${potholes[index].pending_detections}/${DETECTIONS_PER_COUNT_INCREMENT} (count: ${potholes[index].detection_count || 1})`);
+    }
+    
     potholes[index].updated_at = new Date().toISOString();
     savePotholes(potholes);
     return potholes[index];
@@ -184,6 +202,7 @@ module.exports = {
   incrementDetectionCount,
   deletePothole,
   DUPLICATE_THRESHOLD_METERS,
-  TOO_CLOSE_THRESHOLD_METERS
+  TOO_CLOSE_THRESHOLD_METERS,
+  DETECTIONS_PER_COUNT_INCREMENT
 };
 
