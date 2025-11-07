@@ -1,6 +1,6 @@
-import { Video, AVPlaybackStatus } from 'expo-av';
+import { AVPlaybackStatus, ResizeMode, Video } from 'expo-av';
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 interface VideoPlayerProps {
   videoUri: string;
@@ -78,6 +78,17 @@ export default function VideoPlayer({
       const currentTime = statusData.positionMillis || 0;
       const totalDuration = statusData.durationMillis || 0;
       
+      // Check if video has ended (and will loop)
+      if (statusData.didJustFinish) {
+        // Video ended, will automatically loop due to isLooping={true}
+        // Reset to start if needed
+        if (videoRef.current && isPlaying) {
+          videoRef.current.setPositionAsync(0).catch(() => {
+            // Ignore seek errors on loop
+          });
+        }
+      }
+      
       if (totalDuration > 0) {
         onFrameUpdate?.(currentTime, totalDuration);
       }
@@ -104,8 +115,8 @@ export default function VideoPlayer({
         ref={videoRef}
         source={{ uri: videoUri }}
         style={styles.video}
-        resizeMode="contain"
-        isLooping={false}
+        resizeMode={ResizeMode.CONTAIN}
+        isLooping={true}
         shouldPlay={isPlaying}
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         useNativeControls={false}

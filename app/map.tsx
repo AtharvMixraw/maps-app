@@ -343,16 +343,28 @@ export default function MapScreen() {
       hasCoordinates: !!notification.pothole.coordinates,
     });
 
-    // Pause both map and video IMMEDIATELY
-    setIsPaused(true);
+    // CRITICAL: Set pause flag FIRST before clearing interval
+    // This prevents any pending interval callbacks from executing
     isPausedRef.current = true;
-    setIsPlaying(false);
-    syncService.pause();
     
-    // Stop animation immediately
+    // Stop animation IMMEDIATELY - clear interval before any state updates
     if (animationIntervalRef.current) {
       clearInterval(animationIntervalRef.current);
       animationIntervalRef.current = null;
+    }
+    
+    // Now update state (after interval is cleared)
+    setIsPaused(true);
+    setIsPlaying(false);
+    syncService.pause();
+    
+    // Lock vehicle position at current index to prevent any drift
+    // The vehicle should stay exactly where it was when pothole was detected
+    if (vehiclePosition && routeCoordinates.length > 0 && vehicleIndex >= 0) {
+      // Ensure vehicle position is exactly at the current route coordinate
+      const lockedPosition = routeCoordinates[vehicleIndex] || vehiclePosition;
+      setVehiclePosition(lockedPosition);
+      console.log('🔒 Locked vehicle position at index:', vehicleIndex, 'Position:', lockedPosition);
     }
 
     // Calculate pothole coordinates from vehicle position, distance, and lateral offset
@@ -703,32 +715,45 @@ export default function MapScreen() {
     const animationSpeed = 200; // ms per point
 
     animationIntervalRef.current = setInterval(() => {
-      // Check if paused BEFORE updating state
+      // CRITICAL: Check pause flag FIRST, before any state updates
+      // This must be the very first check to prevent any movement when paused
       if (isPausedRef.current) {
+        // Clear interval immediately if paused
         if (animationIntervalRef.current) {
           clearInterval(animationIntervalRef.current);
           animationIntervalRef.current = null;
         }
         setIsPlaying(false);
         syncService.setPlaying(false);
-        return;
+        return; // Exit immediately, don't update any state
       }
       
+      // Only proceed if NOT paused
       setVehicleIndex((currentIndex) => {
-        // Double-check if paused or completed
-        if (isPausedRef.current || currentIndex >= totalPoints - 1) {
-          if (animationIntervalRef.current) {
-            clearInterval(animationIntervalRef.current);
-            animationIntervalRef.current = null;
-          }
-          setIsPlaying(false);
-          syncService.setPlaying(false);
+        // Double-check pause flag again inside state updater (defense in depth)
+        if (isPausedRef.current) {
+          // If paused during state update, don't update position
           return currentIndex;
         }
         
+        // Check if completed - loop back to start if video is looping
+        if (currentIndex >= totalPoints - 1) {
+          // Loop back to start to match video looping
+          const newIndex = 0;
+          const progress = 0;
+          
+          // Update vehicle position to start
+          setVehiclePosition(coordinates[newIndex]);
+          syncService.setMapProgress(progress);
+          
+          return newIndex;
+        }
+        
+        // Continue to next point
         const newIndex = currentIndex + 1;
         const progress = newIndex / totalPoints;
         
+        // Update vehicle position
         setVehiclePosition(coordinates[newIndex]);
         syncService.setMapProgress(progress);
         
