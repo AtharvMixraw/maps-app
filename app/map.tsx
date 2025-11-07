@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { Asset } from 'expo-asset';
 import * as Location from 'expo-location';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -619,67 +618,22 @@ export default function MapScreen() {
 
       await getRoute(currentCoords, destCoords);
       
-      // Load video asset properly for React Native
-      try {
-        if (Platform.OS === 'web') {
-          // On web, you might want to use a URL or skip video
-          setVideoUri('');
-        } else {
-          let videoUri: string | null = null;
-          
-          // Method 1: Try loading from assets folder using Asset.fromModule()
-          try {
-            const videoModule = require('../../assets/videos/video.mp4');
-            const asset = Asset.fromModule(videoModule);
-            await asset.downloadAsync();
-            if (asset.localUri) {
-              videoUri = asset.localUri;
-              console.log('✅ Video loaded from assets:', videoUri);
-            }
-          } catch (assetError) {
-            console.log('⚠️ Asset.fromModule() failed, trying network URL...', assetError);
-            
-            // Method 2: Fallback - Use network URL if video is served via HTTP
-            // For development, serve the video via: python3 -m http.server 8000 (in project root)
-            if (__DEV__) {
-              // For Android emulator, use 10.0.2.2 to access host machine
-              // For iOS simulator, use localhost
-              const host = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-              const networkUri = `http://${host}:8000/video.mp4`;
-              console.log('💡 Trying network URL:', networkUri);
-              
-              // Test if URL is accessible
-              try {
-                const response = await fetch(networkUri, { method: 'HEAD' });
-                if (response.ok) {
-                  videoUri = networkUri;
-                  console.log('✅ Video accessible via network URL:', videoUri);
-                } else {
-                  console.log('⚠️ Network URL returned status:', response.status);
-                }
-              } catch (networkError) {
-                console.log('⚠️ Network URL not accessible. Start HTTP server:');
-                console.log('   cd /Users/anshumohanacharya/Documents/maps-app');
-                console.log('   python3 -m http.server 8000');
-              }
-            }
-          }
-          
-          if (videoUri) {
-            setVideoUri(videoUri);
-          } else {
-            throw new Error('All video loading methods failed');
-          }
-        }
-      } catch (error) {
-        console.error('❌ Error loading video:', error);
-        Alert.alert(
-          'Video Not Found',
-          `Video file could not be loaded.\n\nFor development:\n1. Ensure video.mp4 is in assets/videos/\n2. Or serve via HTTP: python3 -m http.server 8000\n3. Restart the app after adding video.`,
-          [{ text: 'OK' }]
-        );
-        setVideoUri('');
-      }
+      // Load video from Google Drive
+      // Convert Google Drive sharing link to direct stream URL
+      // Sharing URL: https://drive.google.com/file/d/1PirSnQexkWjGW0pGqibLjvX7lYwwY5yB/view?usp=sharing
+      // File ID: 1PirSnQexkWjGW0pGqibLjvX7lYwwY5yB
+      const googleDriveFileId = '1PirSnQexkWjGW0pGqibLjvX7lYwwY5yB';
+      
+      // Use direct stream URL for video playback (better than download URL)
+      const googleDriveVideoUrl = `https://drive.google.com/uc?export=view&id=${googleDriveFileId}`;
+      
+      // Alternative if view doesn't work: Direct download URL
+      // const googleDriveVideoUrl = `https://drive.google.com/uc?export=download&id=${googleDriveFileId}`;
+      
+      console.log('📹 Loading video from Google Drive:');
+      console.log('   File ID:', googleDriveFileId);
+      console.log('   Video URL:', googleDriveVideoUrl);
+      setVideoUri(googleDriveVideoUrl);
     } catch (err) {
       console.error('Init error:', err);
       Alert.alert('Error', 'Could not initialize map');
