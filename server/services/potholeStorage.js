@@ -8,8 +8,8 @@ const path = require('path');
 const distanceCalculator = require('./distanceCalculator');
 
 const STORAGE_FILE = path.join(__dirname, '../../data/potholes.json');
-const DUPLICATE_THRESHOLD_METERS =100; // Consider potholes within 5m as duplicates
-const TOO_CLOSE_THRESHOLD_METERS = 100; // 2 cm - don't increment count if within this distance
+const DUPLICATE_THRESHOLD_METERS = 100; // Consider potholes within 100m as duplicates
+const TOO_CLOSE_THRESHOLD_METERS = 100; // 100 m - don't increment count if within this distance
 const DETECTIONS_PER_COUNT_INCREMENT = 10; // Increment detection_count only after 10 detections
 
 // Ensure data directory exists
