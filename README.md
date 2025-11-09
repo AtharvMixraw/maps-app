@@ -1,50 +1,50 @@
-# 🛣️ Real-Time Pothole Detection & Navigation System
+# Real-Time Pothole Detection & Navigation System
 
-A comprehensive mobile application that combines computer vision, real-time tracking, and interactive mapping to detect and alert users about potholes during navigation. The system uses YOLO11 object detection, SORT tracking, and synchronized map-video playback to provide an immersive pothole detection experience.
-
----
-
-## 👥 Team
-
-- **Anshumohan Acharya**
-- **Shashank Upadhyay**
-- **Atharv Mishra**
-- **Yashas**
+A mobile application that combines computer vision, real-time tracking, and mapping to detect and alert users about potholes during navigation. The system uses YOLO11 object detection, SORT tracking, and synchronized map-video playback to provide an interactive pothole detection experience.
 
 ---
 
-## ✨ Features
+## Team
 
-- 🗺️ **Interactive Route Planning**: Enter start and destination locations with real-time route visualization
-- 🎥 **Synchronized Video Playback**: Video feed synchronized with map navigation for realistic simulation
-- 🤖 **AI-Powered Detection**: YOLO11 model with SORT tracking for accurate pothole detection
-- 📍 **Real-Time Distance Tracking**: Live distance updates as vehicle approaches detected potholes
-- 🔔 **Smart Notifications**: Automatic pause and alert system when potholes are detected
-- 📊 **Pothole Analytics**: Track pothole size, lateral offset, and location coordinates
-- 🌐 **WebSocket Integration**: Real-time bidirectional communication between frontend and backend
-- 📱 **Cross-Platform**: Works on iOS, Android, and Web
+- Anshumohan Acharya
+- Shashank Upadhyay
+- Atharv Mishra
+- Yashas
 
 ---
 
-## 🏗️ Architecture
+## Features
+
+- Interactive Route Planning: Enter start and destination locations with real-time route visualization.
+- Synchronized Video Playback: Video feed is synchronized with map navigation for realistic simulation.
+- AI-Powered Detection: YOLO11 model with SORT tracking for accurate pothole detection.
+- Real-Time Distance Tracking: Live distance updates as the vehicle approaches detected potholes.
+- Smart Notifications: Automatic pause and alert system when potholes are detected.
+- Pothole Analytics: Track pothole size, lateral offset, and location coordinates.
+- WebSocket Integration: Real-time bidirectional communication between frontend and backend.
+- Cross-Platform: Works on iOS, Android, and Web.
+
+---
+
+## Architecture
 
 The system consists of three main components:
 
-### 1. **Frontend (React Native/Expo)**
+### 1. Frontend (React Native/Expo)
 - Mobile application built with Expo Router
 - Interactive map using `react-native-maps`
 - Video player with synchronization service
 - WebSocket client for real-time updates
 - Notification display system
 
-### 2. **Backend (Node.js/Express)**
+### 2. Backend (Node.js/Express)
 - RESTful API server
 - WebSocket server for real-time communication
 - Distance calculation service (Haversine formula)
 - Coordinate calculation and geocoding
 - Notification management system
 
-### 3. **C++ Detection Model**
+### 3. C++ Detection Model
 - YOLO11 object detection model
 - SORT (Simple Online and Realtime Tracking) algorithm
 - Distance estimation using camera geometry
@@ -52,42 +52,42 @@ The system consists of three main components:
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Frontend
-- **Framework**: React Native (Expo)
-- **Routing**: Expo Router
-- **Maps**: react-native-maps
-- **Video**: expo-video
-- **HTTP Client**: Axios
-- **Language**: TypeScript
+- Framework: React Native (Expo)
+- Routing: Expo Router
+- Maps: react-native-maps
+- Video: expo-video
+- HTTP Client: Axios
+- Language: TypeScript
 
 ### Backend
-- **Runtime**: Node.js
-- **Framework**: Express.js
-- **WebSocket**: ws
-- **CORS**: cors middleware
+- Runtime: Node.js
+- Framework: Express.js
+- WebSocket: ws
+- CORS: cors middleware
 
 ### AI/ML
-- **Detection Model**: YOLO11
-- **Tracking**: SORT algorithm
-- **Inference Engine**: TensorRT (`.engine` files)
-- **Language**: C++
+- Detection Model: YOLO11
+- Tracking: SORT algorithm
+- Inference Engine: TensorRT (`.engine` files)
+- Language: C++
 
 ### External Services
-- **Geocoding**: OpenStreetMap Nominatim API
-- **Routing**: OSRM Routing Service
+- Geocoding: OpenStreetMap Nominatim API
+- Routing: OSRM Routing Service
 
 ---
 
-## 📦 Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 
 - Node.js (v18 or higher)
 - npm or yarn
 - Expo CLI (`npm install -g expo-cli`)
-- iOS Simulator / Android Emulator / Physical device
+- iOS Simulator, Android Emulator, or physical device
 - (Optional) C++ build tools for running the detection model
 
 ### Step 1: Clone the Repository
@@ -131,7 +131,7 @@ WebSocket server ready for connections
 In a new terminal:
 
 ```bash
-npm start
+npx expo start
 ```
 
 Then press:
@@ -143,39 +143,41 @@ Then press:
 
 ```bash
 cd Pothole/build
-./yolo_pipeline --run -v ../video.mp4 -e ../best.engine
+./yolo_pipeline --run -v <path-to-your-video.mp4> -e <path-to-your-engine-file.engine> --h_m 1.5 --theta_init_deg 15
 ```
+Replace `<path-to-your-video.mp4>` with the path to your video file and `<path-to-your-engine-file.engine>` with the path to your TensorRT engine file.
+
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### Basic Workflow
 
-1. **Enter Locations**
+1. Enter Locations
    - Open the app
    - Enter start location (e.g., "New York, NY")
    - Enter destination (e.g., "Boston, MA")
    - Click "Show Route"
 
-2. **Start Simulation**
-   - Route is calculated and displayed on map
+2. Start Simulation
+   - Route is calculated and displayed on the map
    - Video playback starts automatically
    - Vehicle marker animates along the route
 
-3. **Pothole Detection**
+3. Pothole Detection
    - When a pothole is detected:
      - Map and video automatically pause
      - Notification appears with pothole details
      - Real-time distance updates every second
 
-4. **Resume Navigation**
+4. Resume Navigation
    - Click "Resume" button to continue
-   - Distance updates continue until pothole is passed
+   - Distance updates continue until the pothole is passed
 
 ---
 
-## 🔌 API Documentation
+## API Documentation
 
 ### Backend Endpoints
 
@@ -293,7 +295,7 @@ ws://localhost:5001
 
 ---
 
-## 🔄 System Flow
+## System Flow
 
 ### Complete Data Flow
 
@@ -320,14 +322,14 @@ ws://localhost:5001
 
 ### Synchronization Mechanism
 
-1. **Map Animation**: Vehicle marker moves along route at 200ms per coordinate point
-2. **Video Playback**: Video frames correspond 1:1 with route points
-3. **Sync Service**: Tracks both map and video progress (0-1) to maintain synchronization
-4. **Pause/Resume**: Both map and video pause/resume simultaneously
+1. Map Animation: Vehicle marker moves along route at 200ms per coordinate point
+2. Video Playback: Video frames correspond 1:1 with route points
+3. Sync Service: Tracks both map and video progress (0 to 1) to maintain synchronization
+4. Pause/Resume: Both map and video pause/resume simultaneously
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ### Test Without C++ Model
 
@@ -352,7 +354,7 @@ This simulates a pothole detection and triggers the same notification flow.
 
 ### Expected Behavior
 
-1. Backend receives webhook → creates notification
+1. Backend receives webhook and creates notification
 2. WebSocket broadcasts to frontend
 3. Frontend pauses map and video
 4. Notification component appears
@@ -361,7 +363,7 @@ This simulates a pothole detection and triggers the same notification flow.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 maps-app/
@@ -394,7 +396,7 @@ maps-app/
 
 ---
 
-## 🔧 Configuration
+## Configuration
 
 ### Backend Port
 Default port is `5001`. To change:
@@ -411,42 +413,42 @@ Default video path is `assets/videos/video.mp4`. Ensure the file exists or updat
 
 ---
 
-## 🐛 Error Handling
+## Error Handling
 
-- **WebSocket fails**: Falls back to HTTP polling every 2 seconds
-- **Backend unreachable**: App shows connection error message
-- **Video file missing**: Video player doesn't appear, map still works
-- **Route calculation fails**: Shows error alert to user
-- **C++ model fails**: Can still test with webhook simulation
+- If WebSocket fails, the application falls back to HTTP polling every 2 seconds.
+- If the backend is unreachable, the app shows a connection error message.
+- If the video file is missing, the video player will not appear but the map still works.
+- If route calculation fails, an error alert is shown to the user.
+- If the C++ model fails, you can still test using the webhook simulation.
 
 ---
 
-## 🎯 Key Features Explained
+## Key Features Explained
 
 ### Real-Time Distance Calculation
-- Uses Haversine formula to calculate distance between vehicle and pothole
-- Updates every second while notification is active
-- Accounts for vehicle movement along the route
+- Uses the Haversine formula to calculate distance between the vehicle and pothole.
+- Updates every second while a notification is active.
+- Accounts for vehicle movement along the route.
 
 ### Synchronized Playback
-- Map animation and video playback are tightly synchronized
-- Frame N of video corresponds to route point N
-- Pause/resume operations affect both simultaneously
+- Map animation and video playback are synchronized.
+- Video frame N corresponds to route point N.
+- Pause/resume operations affect both simultaneously.
 
 ### Pothole Tracking
-- SORT algorithm tracks potholes across frames
-- Maintains unique track IDs for each pothole
-- Prevents duplicate notifications for the same pothole
+- SORT algorithm tracks potholes across frames.
+- Maintains unique track IDs for each pothole.
+- Prevents duplicate notifications for the same pothole.
 
 ---
 
-## 📝 License
+## License
 
 This project is developed for hackathon purposes.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - YOLO11 for object detection
 - SORT algorithm for tracking
@@ -456,7 +458,7 @@ This project is developed for hackathon purposes.
 
 ---
 
-## 📞 Support
+## Support
 
 For questions or issues, please contact any of the team members listed above.
 
